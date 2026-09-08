@@ -206,45 +206,88 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </div>
         </div>
 
-        {/* Options Row (Depth & Limit) */}
+        {/* Options Row (Depth & Limit - Unrestricted) */}
         <div className="grid grid-cols-2 gap-3 pt-1">
           {/* Depth */}
           <div className="space-y-1.5">
             <div className="flex items-center justify-between">
-              <label className="font-semibold text-[#c9d1d9]">Depth:</label>
-              <span className="font-mono font-bold text-[#58a6ff]">{options.depth}</span>
+              <label htmlFor="crawl-depth-input" className="font-semibold text-[#c9d1d9] text-xs">
+                Traversal Depth:
+              </label>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5">
               <input
-                type="range"
+                id="crawl-depth-input"
+                type="number"
                 min="1"
-                max="5"
+                step="1"
                 value={options.depth}
-                onChange={(e) => onChangeOptions({ depth: parseInt(e.target.value, 10) })}
-                className="w-full accent-[#238636] cursor-pointer"
+                onChange={(e) => {
+                  const val = parseInt(e.target.value, 10);
+                  onChangeOptions({ depth: isNaN(val) ? 1 : Math.max(1, val) });
+                }}
+                className="w-full px-2.5 py-1.5 bg-[#161b22] border border-[#30363d] rounded text-[#f0f6fc] font-mono text-xs font-semibold focus:outline-none focus:border-[#58a6ff] transition-colors"
               />
             </div>
-            <p className="text-[10px] text-[#8b949e]">Level of follower traversal</p>
+            {/* Quick depth presets */}
+            <div className="flex items-center gap-1">
+              {[1, 2, 3, 4, 5].map((d) => (
+                <button
+                  key={d}
+                  type="button"
+                  onClick={() => onChangeOptions({ depth: d })}
+                  className={`px-1.5 py-0.5 rounded text-[10px] font-mono transition-colors ${
+                    options.depth === d
+                      ? 'bg-[#238636] text-white font-bold'
+                      : 'bg-[#161b22] hover:bg-[#21262d] text-[#8b949e]'
+                  }`}
+                >
+                  {d}
+                </button>
+              ))}
+            </div>
+            <p className="text-[10px] text-[#8b949e]">Any depth value (e.g. 1, 2, 5...)</p>
           </div>
 
-          {/* Limit */}
+          {/* Limit (Followers per node) */}
           <div className="space-y-1.5">
             <div className="flex items-center justify-between">
-              <label className="font-semibold text-[#c9d1d9]">Limit:</label>
-              <span className="font-mono font-bold text-[#58a6ff]">{options.limit}</span>
+              <label htmlFor="crawl-limit-input" className="font-semibold text-[#c9d1d9] text-xs">
+                Followers / Node:
+              </label>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5">
               <input
-                type="range"
-                min="3"
-                max="50"
+                id="crawl-limit-input"
+                type="number"
+                min="1"
                 step="1"
                 value={options.limit}
-                onChange={(e) => onChangeOptions({ limit: parseInt(e.target.value, 10) })}
-                className="w-full accent-[#238636] cursor-pointer"
+                onChange={(e) => {
+                  const val = parseInt(e.target.value, 10);
+                  onChangeOptions({ limit: isNaN(val) ? 1 : Math.max(1, val) });
+                }}
+                className="w-full px-2.5 py-1.5 bg-[#161b22] border border-[#30363d] rounded text-[#f0f6fc] font-mono text-xs font-semibold focus:outline-none focus:border-[#58a6ff] transition-colors"
               />
             </div>
-            <p className="text-[10px] text-[#8b949e]">Followers per user node</p>
+            {/* Quick limit presets */}
+            <div className="flex items-center gap-1">
+              {[5, 10, 25, 50, 100].map((l) => (
+                <button
+                  key={l}
+                  type="button"
+                  onClick={() => onChangeOptions({ limit: l })}
+                  className={`px-1.5 py-0.5 rounded text-[10px] font-mono transition-colors ${
+                    options.limit === l
+                      ? 'bg-[#238636] text-white font-bold'
+                      : 'bg-[#161b22] hover:bg-[#21262d] text-[#8b949e]'
+                  }`}
+                >
+                  {l}
+                </button>
+              ))}
+            </div>
+            <p className="text-[10px] text-[#8b949e]">Any limit (e.g. 10, 50, 200...)</p>
           </div>
         </div>
 

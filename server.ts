@@ -114,8 +114,10 @@ async function scrapeUserFollowers(
   const profiles: ScrapedFollowerProfile[] = [];
   const seen = new Set<string>();
   let page = 1;
+  // Calculate maximum pages to inspect to satisfy the requested limit
+  const maxPages = Math.max(Math.ceil(limit / 25) + 3, 500);
 
-  while (followers.length < limit && page <= 10) {
+  while (followers.length < limit && page <= maxPages) {
     const url = `https://github.com/${encodeURIComponent(username)}?tab=followers&page=${page}`;
     const res = await fetch(url, { headers: DEFAULT_HEADERS });
 
@@ -210,7 +212,8 @@ async function startServer() {
   // API Scraping: User Followers
   app.get('/api/scrape/followers', async (req: Request, res: Response) => {
     const username = (req.query.username as string || '').trim();
-    const limit = Math.min(Math.max(parseInt(req.query.limit as string || '10', 10), 1), 50);
+    const rawLimit = parseInt(req.query.limit as string || '10', 10);
+    const limit = isNaN(rawLimit) || rawLimit < 1 ? 10 : rawLimit;
 
     if (!username) {
       res.status(400).json({ error: 'Username is required' });
