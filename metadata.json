@@ -1,0 +1,6 @@
+{
+  "name": "GitHub Network Matrix",
+  "description": "Interactive GitHub user and follower network graph visualization with real-time crawling, physics simulation, and node inspection.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
