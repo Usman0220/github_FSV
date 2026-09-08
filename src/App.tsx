@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Header } from './components/Header';
 import { Sidebar } from './components/Sidebar';
 import { GraphCanvas } from './components/GraphCanvas';
@@ -39,7 +39,13 @@ export default function App() {
   const [inGraphFollowers, setInGraphFollowers] = useState<string[]>([]);
   const [inGraphFollowing, setInGraphFollowing] = useState<string[]>([]);
   const [expandingUser, setExpandingUser] = useState<string | null>(null);
+  const [settingRootUser, setSettingRootUser] = useState<string | null>(null);
   const [focusedUserId, setFocusedUserId] = useState<string | null>(null);
+
+  const optionsRef = useRef(options);
+  optionsRef.current = options;
+
+  const crawlIdRef = useRef<number>(0);
 
   // Update options helper with token storage
   const handleUpdateOptions = (newOpts: Partial<CrawlOptions>) => {
@@ -156,60 +162,92 @@ export default function App() {
   }, []);
 
   // Start Crawl
-  const handleStartCrawl = useCallback(async () => {
-    if (isCrawling) return;
-
-    const parsedTarget = parseGitHubInput(options.startUser);
-    if (!parsedTarget) {
-      addLog({
-        id: Math.random().toString(),
-        timestamp: new Date().toLocaleTimeString(),
-        message: '❌ Please enter a valid GitHub username or URL.',
-        type: 'error',
-      });
-      return;
-    }
-
-    // Reset previous graph
-    setNodes([]);
-    setEdges([]);
-    setSelectedUser(null);
-    setIsCrawling(true);
-    setActiveScrapingUser(parsedTarget);
-
-    try {
-      await crawlerService.crawlNetwork(
-        {
-          startUser: options.startUser,
-          token: options.token,
-          depth: options.depth,
-          limit: options.limit,
-        },
-        {
-          onNode: handleNodeDiscovered,
-          onEdge: handleEdgeDiscovered,
-          onLog: addLog,
-          onRateLimit: setRateLimit,
-          onProgress: (currentUser) => {
-            setActiveScrapingUser(currentUser);
-          },
-          onFinish: () => {
-            setIsCrawling(false);
-            setActiveScrapingUser(null);
-          },
-        }
-      );
-    } catch (err) {
-      addLog({
-        id: Math.random().toString(),
-        timestamp: new Date().toLocaleTimeString(),
-        message: `❌ Crawl Error: ${(err as Error)?.message || 'Unknown error'}`,
-        type: 'error',
-      });
+  const handleStartCrawl = useCallback(
+    async (overrideUser?: string) => {
+      // Abort any ongoing crawl
+      crawlerService.abort();
       setIsCrawling(false);
       setActiveScrapingUser(null);
-    }
-  }, [options, isCrawling, handleNodeDiscovered, handleEdgeDiscovered, addLog]);
+
+      const currentOptions = optionsRef.current;
+      const rawTarget = overrideUser || currentOptions.startUser;
+      const parsedTarget = parseGitHubInput(rawTarget);
+
+      if (!parsedTarget) {
+        addLog({
+          id: Math.random().toString(),
+          timestamp: new Date().toLocaleTimeString(),
+          message: '❌ Please enter a valid GitHub username or URL.',
+          type: 'error',
+        });
+        return;
+      }
+
+      // Unique crawl ID to prevent race conditions or stale callbacks from previous crawls
+      const currentCrawlId = ++crawlIdRef.current;
+
+      // Reset previous graph for fresh root crawl
+      setNodes([]);
+      setEdges([]);
+      setSelectedUser(null);
+      setInGraphFollowers([]);
+      setInGraphFollowing([]);
+      setIsCrawling(true);
+      setActiveScrapingUser(parsedTarget);
+
+      try {
+        await crawlerService.crawlNetwork(
+          {
+            startUser: parsedTarget,
+            token: currentOptions.token,
+            depth: currentOptions.depth,
+            limit: currentOptions.limit,
+          },
+          {
+            onNode: (user, isRoot, level) => {
+              if (crawlIdRef.current === currentCrawlId) {
+                handleNodeDiscovered(user, isRoot, level);
+              }
+            },
+            onEdge: (from, to) => {
+              if (crawlIdRef.current === currentCrawlId) {
+                handleEdgeDiscovered(from, to);
+              }
+            },
+            onLog: (log) => {
+              if (crawlIdRef.current === currentCrawlId) {
+                addLog(log);
+              }
+            },
+            onRateLimit: setRateLimit,
+            onProgress: (currentUser) => {
+              if (crawlIdRef.current === currentCrawlId) {
+                setActiveScrapingUser(currentUser);
+              }
+            },
+            onFinish: () => {
+              if (crawlIdRef.current === currentCrawlId) {
+                setIsCrawling(false);
+                setActiveScrapingUser(null);
+              }
+            },
+          }
+        );
+      } catch (err) {
+        if (crawlIdRef.current === currentCrawlId) {
+          addLog({
+            id: Math.random().toString(),
+            timestamp: new Date().toLocaleTimeString(),
+            message: `❌ Crawl Error: ${(err as Error)?.message || 'Unknown error'}`,
+            type: 'error',
+          });
+          setIsCrawling(false);
+          setActiveScrapingUser(null);
+        }
+      }
+    },
+    [handleNodeDiscovered, handleEdgeDiscovered, addLog]
+  );
 
   // Stop Crawl / Halt Scraping
   const handleStopCrawl = useCallback(() => {
@@ -344,11 +382,27 @@ export default function App() {
   };
 
   // Set Root & Re-crawl
-  const handleSetRootUser = (username: string) => {
-    handleUpdateOptions({ startUser: username });
-    setTimeout(() => {
-      handleStartCrawl();
-    }, 100);
+  const handleSetRootUser = async (username: string) => {
+    if (!username) return;
+    const cleanUsername = parseGitHubInput(username) || username;
+
+    setSettingRootUser(cleanUsername);
+
+    addLog({
+      id: Math.random().toString(),
+      timestamp: new Date().toLocaleTimeString(),
+      message: `🎯 Setting @${cleanUsername} as the new Root Node & re-crawling matrix...`,
+      type: 'info',
+    });
+
+    // Update stored options so sidebar reflects the new root user
+    handleUpdateOptions({ startUser: cleanUsername });
+
+    try {
+      await handleStartCrawl(cleanUsername);
+    } finally {
+      setSettingRootUser(null);
+    }
   };
 
   // Focus node
@@ -474,6 +528,7 @@ export default function App() {
               onSetRootUser={handleSetRootUser}
               onFocusNode={handleFocusNode}
               isExpanding={expandingUser?.toLowerCase() === selectedUser?.login?.toLowerCase()}
+              isSettingRoot={settingRootUser?.toLowerCase() === selectedUser?.login?.toLowerCase()}
             />
           )}
         </div>

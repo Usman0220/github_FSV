@@ -24,6 +24,7 @@ interface NodeInspectorProps {
   onSetRootUser: (username: string) => void;
   onFocusNode: (username: string) => void;
   isExpanding?: boolean;
+  isSettingRoot?: boolean;
 }
 
 export const NodeInspector: React.FC<NodeInspectorProps> = ({
@@ -35,6 +36,7 @@ export const NodeInspector: React.FC<NodeInspectorProps> = ({
   onSetRootUser,
   onFocusNode,
   isExpanding = false,
+  isSettingRoot = false,
 }) => {
   if (!user) return null;
 
@@ -162,11 +164,24 @@ export const NodeInspector: React.FC<NodeInspectorProps> = ({
           </button>
           <button
             onClick={() => user.login && onSetRootUser(user.login)}
-            disabled={isExpanding}
-            className="w-full flex items-center justify-center gap-2 py-2 px-3 bg-[#21262d] hover:bg-[#30363d] text-[#c9d1d9] font-medium rounded-lg border border-[#30363d] transition-all disabled:opacity-50"
+            disabled={isExpanding || isSettingRoot}
+            className={`w-full flex items-center justify-center gap-2 py-2 px-3 font-medium rounded-lg border transition-all ${
+              isSettingRoot
+                ? 'bg-[#1f6feb]/20 text-[#58a6ff] border-[#1f6feb]/50 cursor-wait'
+                : 'bg-[#21262d] hover:bg-[#30363d] text-[#c9d1d9] border-[#30363d] active:scale-[0.98]'
+            } disabled:opacity-50`}
           >
-            <Compass className="w-3.5 h-3.5 text-[#58a6ff]" />
-            Set @{user.login} as Root & Re-crawl
+            {isSettingRoot ? (
+              <>
+                <Loader2 className="w-3.5 h-3.5 animate-spin text-[#58a6ff]" />
+                <span>Setting @{user.login} as Root...</span>
+              </>
+            ) : (
+              <>
+                <Compass className="w-3.5 h-3.5 text-[#58a6ff]" />
+                <span>Set @{user.login} as Root & Re-crawl</span>
+              </>
+            )}
           </button>
         </div>
 

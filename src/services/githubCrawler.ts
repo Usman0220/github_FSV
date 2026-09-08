@@ -317,7 +317,7 @@ export class GitHubCrawlerService {
           continue;
         }
 
-        const fRes = await this.fetchFollowers(currentLogin, options.limit, options.token, signal);
+        const fRes = await this.fetchFollowers(currentLogin, options.limit, options.token, signal, item.isRoot);
         if (this.isAborted || signal.aborted) {
           wasHalted = true;
           break;
