@@ -38,6 +38,8 @@ export default function App() {
   const [selectedUser, setSelectedUser] = useState<Partial<GitHubUser> | null>(null);
   const [inGraphFollowers, setInGraphFollowers] = useState<string[]>([]);
   const [inGraphFollowing, setInGraphFollowing] = useState<string[]>([]);
+  const [expandingUser, setExpandingUser] = useState<string | null>(null);
+  const [focusedUserId, setFocusedUserId] = useState<string | null>(null);
 
   // Update options helper with token storage
   const handleUpdateOptions = (newOpts: Partial<CrawlOptions>) => {
@@ -216,17 +218,61 @@ export default function App() {
     setActiveScrapingUser(null);
   }, []);
 
+  // User selection with async profile enrichment for stub nodes
+  const handleSelectUser = useCallback((user: Partial<GitHubUser>, followers: string[], following: string[]) => {
+    setSelectedUser(user);
+    setInGraphFollowers(followers);
+    setInGraphFollowing(following);
+
+    // If this node only has basic info, asynchronously enrich details
+    if (user.login && (user.followers === undefined || user.name === undefined)) {
+      crawlerService.fetchUserDetails(user.login, options.token).then((res) => {
+        if (res.user) {
+          setSelectedUser((curr) => {
+            if (curr?.login?.toLowerCase() === user.login?.toLowerCase()) {
+              return { ...curr, ...res.user };
+            }
+            return curr;
+          });
+          setNodes((prevNodes) =>
+            prevNodes.map((n) =>
+              n.id.toLowerCase() === user.login!.toLowerCase()
+                ? { ...n, userDetails: { ...n.userDetails, ...res.user } }
+                : n
+            )
+          );
+        }
+      }).catch(() => {});
+    }
+  }, [options.token]);
+
   // Expand single user followers
   const handleExpandUser = async (username: string) => {
+    if (!username || expandingUser) return;
+    setExpandingUser(username);
+
     addLog({
       id: Math.random().toString(),
       timestamp: new Date().toLocaleTimeString(),
-      message: `🌱 Expanding follower network for: @${username}...`,
+      message: `🌱 Expanding follower network for: @${username} (Limit: ${options.limit})...`,
       type: 'info',
     });
 
     try {
-      const res = await crawlerService.fetchFollowers(username, options.limit, options.token);
+      // 1. Fetch user profile if details are incomplete (e.g. bio or followers count missing)
+      const userRes = await crawlerService.fetchUserDetails(username, options.token);
+      if (userRes.user) {
+        handleNodeDiscovered(userRes.user, false, 2);
+        setSelectedUser((current) => {
+          if (current?.login?.toLowerCase() === username.toLowerCase()) {
+            return { ...current, ...userRes.user };
+          }
+          return current;
+        });
+      }
+
+      // 2. Fetch fresh followers bypassing cache so current options.limit is respected
+      const res = await crawlerService.fetchFollowers(username, options.limit, options.token, undefined, true);
       if (res.rateLimit) setRateLimit(res.rateLimit);
 
       if (res.followers.length === 0) {
@@ -239,6 +285,7 @@ export default function App() {
         return;
       }
 
+      // 3. Add discovered nodes and directed edges (follower -> user)
       for (let i = 0; i < res.followers.length; i++) {
         const followerLogin = res.followers[i];
         const profile = res.followerProfiles[i] || {
@@ -250,6 +297,24 @@ export default function App() {
         handleNodeDiscovered(profile, false, 3);
         handleEdgeDiscovered(followerLogin, username);
       }
+
+      // 4. Update inGraphFollowers if this user is selected
+      setSelectedUser((current) => {
+        if (current?.login?.toLowerCase() === username.toLowerCase()) {
+          setInGraphFollowers((prev) => {
+            const set = new Set(prev.map((f) => f.toLowerCase()));
+            const next = [...prev];
+            for (const f of res.followers) {
+              if (!set.has(f.toLowerCase())) {
+                set.add(f.toLowerCase());
+                next.push(f);
+              }
+            }
+            return next;
+          });
+        }
+        return current;
+      });
 
       addLog({
         id: Math.random().toString(),
@@ -273,6 +338,8 @@ export default function App() {
           type: 'warn',
         });
       }
+    } finally {
+      setExpandingUser(null);
     }
   };
 
@@ -287,18 +354,26 @@ export default function App() {
   // Focus node
   const handleFocusNode = (username: string) => {
     const found = nodes.find((n) => n.id.toLowerCase() === username.toLowerCase());
-    if (found && found.userDetails) {
-      // Find in-graph connections
-      const followers: string[] = [];
-      const following: string[] = [];
-      edges.forEach((e) => {
-        if (e.to.toLowerCase() === username.toLowerCase()) followers.push(e.from);
-        if (e.from.toLowerCase() === username.toLowerCase()) following.push(e.to);
-      });
-      setSelectedUser(found.userDetails);
-      setInGraphFollowers(followers);
-      setInGraphFollowing(following);
-    }
+    const userDetails = found?.userDetails || {
+      login: username,
+      avatar_url: `https://avatars.githubusercontent.com/u/0?v=4`,
+      html_url: `https://github.com/${username}`,
+    };
+
+    // Find in-graph connections
+    const followers: string[] = [];
+    const following: string[] = [];
+    const normUsername = username.toLowerCase();
+    edges.forEach((e) => {
+      if (e.to.toLowerCase() === normUsername) followers.push(e.from);
+      if (e.from.toLowerCase() === normUsername) following.push(e.to);
+    });
+
+    setSelectedUser(userDetails);
+    setInGraphFollowers(followers);
+    setInGraphFollowing(following);
+    setFocusedUserId(username);
+    setTimeout(() => setFocusedUserId(null), 800);
   };
 
   // Reset graph
@@ -379,11 +454,9 @@ export default function App() {
             edges={edges}
             enablePhysics={options.enablePhysics}
             onTogglePhysics={(enabled) => handleUpdateOptions({ enablePhysics: enabled })}
-            onSelectUser={(user, followers, following) => {
-              setSelectedUser(user);
-              setInGraphFollowers(followers);
-              setInGraphFollowing(following);
-            }}
+            onSelectUser={handleSelectUser}
+            selectedUserId={selectedUser?.login || null}
+            focusedUserId={focusedUserId}
             onExpandUser={handleExpandUser}
             isCrawling={isCrawling}
             onStopCrawl={handleStopCrawl}
@@ -400,6 +473,7 @@ export default function App() {
               onExpandUser={handleExpandUser}
               onSetRootUser={handleSetRootUser}
               onFocusNode={handleFocusNode}
+              isExpanding={expandingUser?.toLowerCase() === selectedUser?.login?.toLowerCase()}
             />
           )}
         </div>

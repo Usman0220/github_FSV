@@ -31,6 +31,8 @@ interface GraphCanvasProps {
   enablePhysics: boolean;
   onTogglePhysics: (enabled: boolean) => void;
   onSelectUser: (user: Partial<GitHubUser>, inGraphFollowers: string[], inGraphFollowing: string[]) => void;
+  selectedUserId?: string | null;
+  focusedUserId?: string | null;
   onExpandUser?: (username: string) => void;
   isCrawling?: boolean;
   onStopCrawl?: () => void;
@@ -43,6 +45,9 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
   enablePhysics,
   onTogglePhysics,
   onSelectUser,
+  selectedUserId,
+  focusedUserId,
+  onExpandUser,
   isCrawling = false,
   onStopCrawl,
   activeScrapingUser,
@@ -51,6 +56,50 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
   const networkRef = useRef<Network | null>(null);
   const nodesDataSetRef = useRef<DataSet<any> | null>(null);
   const edgesDataSetRef = useRef<DataSet<any> | null>(null);
+
+  // Fresh references to prevent stale closures in Vis.js event listeners
+  const onSelectUserRef = useRef(onSelectUser);
+  onSelectUserRef.current = onSelectUser;
+
+  const nodesRef = useRef(nodes);
+  nodesRef.current = nodes;
+
+  const edgesRef = useRef(edges);
+  edgesRef.current = edges;
+
+  // Reliable node selection callback with robust fallback & case-insensitivity
+  const handleNodeSelection = useCallback((nodeId: string) => {
+    if (!nodeId) return;
+    const normId = String(nodeId).toLowerCase();
+
+    // Look up node in current nodesRef first (most up-to-date), then dataset
+    const foundNode = nodesRef.current.find((n) => String(n.id).toLowerCase() === normId);
+    const rawNode = nodesDataSetRef.current?.get(nodeId) as any;
+    const nodeItem = Array.isArray(rawNode) ? rawNode[0] : rawNode;
+
+    const userDetails: Partial<GitHubUser> = foundNode?.userDetails || nodeItem?.userDetails || {
+      login: String(nodeId),
+      avatar_url: `https://avatars.githubusercontent.com/u/0?v=4`,
+      html_url: `https://github.com/${nodeId}`,
+    };
+
+    const currentEdges = (edgesDataSetRef.current?.get() || edgesRef.current || []) as any[];
+    const inGraphFollowers: string[] = [];
+    const inGraphFollowing: string[] = [];
+
+    currentEdges.forEach((edge: any) => {
+      const fromNorm = String(edge.from || '').toLowerCase();
+      const toNorm = String(edge.to || '').toLowerCase();
+      if (toNorm === normId && edge.from) {
+        inGraphFollowers.push(edge.from);
+      }
+      if (fromNorm === normId && edge.to) {
+        inGraphFollowing.push(edge.to);
+      }
+    });
+
+    onSelectUserRef.current(userDetails, inGraphFollowers, inGraphFollowing);
+  }, []);
 
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<NetworkNodeData[]>([]);
@@ -254,35 +303,26 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
 
     networkRef.current = network;
 
+    // Select node handler - fires reliably whenever any node is selected (click, tap, drag-end)
+    network.on('selectNode', (params) => {
+      if (params.nodes && params.nodes.length > 0) {
+        handleNodeSelection(params.nodes[0]);
+      }
+    });
+
     // Node click handler
     network.on('click', (params) => {
       if (params.nodes && params.nodes.length > 0) {
-        const selectedId = params.nodes[0];
-        const rawNode = nodesDataSet.get(selectedId) as any;
-        const nodeItem = Array.isArray(rawNode) ? rawNode[0] : rawNode;
-        if (nodeItem && nodeItem.userDetails) {
-          const currentEdges = (edgesDataSet.get() || []) as any[];
-          const inGraphFollowers: string[] = [];
-          const inGraphFollowing: string[] = [];
-
-          currentEdges.forEach((edge: any) => {
-            if (edge.to === selectedId) {
-              inGraphFollowers.push(edge.from);
-            }
-            if (edge.from === selectedId) {
-              inGraphFollowing.push(edge.to);
-            }
-          });
-
-          onSelectUser(nodeItem.userDetails, inGraphFollowers, inGraphFollowing);
-        }
+        handleNodeSelection(params.nodes[0]);
       }
     });
 
     // Double click to focus
     network.on('doubleClick', (params) => {
       if (params.nodes && params.nodes.length > 0) {
-        network.focus(params.nodes[0], {
+        const targetId = params.nodes[0];
+        handleNodeSelection(targetId);
+        network.focus(targetId, {
           scale: 1.4,
           animation: {
             duration: 700,
@@ -296,7 +336,38 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
       network.destroy();
       networkRef.current = null;
     };
-  }, []);
+  }, [handleNodeSelection]);
+
+  // Synchronize externally selected node (highlighting on canvas)
+  useEffect(() => {
+    if (!networkRef.current || !selectedUserId) return;
+    try {
+      const selected = networkRef.current.getSelectedNodes();
+      const normSelected = selected.map((s) => String(s).toLowerCase());
+      if (!normSelected.includes(selectedUserId.toLowerCase())) {
+        networkRef.current.selectNodes([selectedUserId]);
+      }
+    } catch {
+      // Ignore if node is still rendering
+    }
+  }, [selectedUserId]);
+
+  // Smoothly center and zoom when focus is requested
+  useEffect(() => {
+    if (!networkRef.current || !focusedUserId) return;
+    try {
+      networkRef.current.selectNodes([focusedUserId]);
+      networkRef.current.focus(focusedUserId, {
+        scale: 1.4,
+        animation: {
+          duration: 600,
+          easingFunction: 'easeInOutQuad',
+        },
+      });
+    } catch {
+      // Ignore if node is still rendering
+    }
+  }, [focusedUserId]);
 
   // Update interaction mode (Pan Canvas vs Drag Nodes)
   useEffect(() => {
@@ -306,6 +377,8 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
         dragNodes: interactionMode === 'nodes',
         dragView: true,
         zoomView: true,
+        selectable: true,
+        selectConnectedEdges: false,
       },
     });
   }, [interactionMode]);
@@ -490,9 +563,7 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
       animation: { duration: 700, easingFunction: 'easeInOutQuad' },
     });
 
-    if (node.userDetails) {
-      onSelectUser(node.userDetails, [], []);
-    }
+    handleNodeSelection(node.id);
   };
 
   // Export Canvas Image

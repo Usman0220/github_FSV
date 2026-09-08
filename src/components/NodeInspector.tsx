@@ -10,7 +10,8 @@ import {
   UserPlus, 
   Compass, 
   Share2,
-  ArrowRight
+  ArrowRight,
+  Loader2
 } from 'lucide-react';
 import { GitHubUser } from '../types';
 
@@ -22,6 +23,7 @@ interface NodeInspectorProps {
   onExpandUser: (username: string) => void;
   onSetRootUser: (username: string) => void;
   onFocusNode: (username: string) => void;
+  isExpanding?: boolean;
 }
 
 export const NodeInspector: React.FC<NodeInspectorProps> = ({
@@ -32,6 +34,7 @@ export const NodeInspector: React.FC<NodeInspectorProps> = ({
   onExpandUser,
   onSetRootUser,
   onFocusNode,
+  isExpanding = false,
 }) => {
   if (!user) return null;
 
@@ -39,9 +42,16 @@ export const NodeInspector: React.FC<NodeInspectorProps> = ({
     <div className="absolute right-4 top-16 bottom-4 w-84 max-w-full bg-[#161b22]/95 backdrop-blur-md border border-[#30363d] rounded-2xl shadow-2xl flex flex-col z-30 overflow-hidden text-xs animate-in fade-in slide-in-from-right-4 duration-200">
       {/* Top Header */}
       <div className="flex items-center justify-between p-3.5 border-b border-[#30363d] bg-[#1c2128]">
-        <span className="font-semibold text-[#8b949e] uppercase tracking-wider text-[10px]">
-          Node Inspector
-        </span>
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="font-semibold text-[#8b949e] uppercase tracking-wider text-[10px]">
+            Node Inspector
+          </span>
+          {user.login && (
+            <span className="px-1.5 py-0.5 rounded bg-[#21262d] text-[#58a6ff] text-[10px] font-mono truncate max-w-[130px]">
+              @{user.login}
+            </span>
+          )}
+        </div>
         <button
           onClick={onClose}
           className="p-1 rounded-md text-[#8b949e] hover:text-[#c9d1d9] hover:bg-[#30363d] transition-colors"
@@ -131,17 +141,32 @@ export const NodeInspector: React.FC<NodeInspectorProps> = ({
         <div className="space-y-2 pt-1">
           <button
             onClick={() => user.login && onExpandUser(user.login)}
-            className="w-full flex items-center justify-center gap-2 py-2 px-3 bg-[#238636] hover:bg-[#2ea44f] text-white font-semibold rounded-lg shadow-sm transition-all active:scale-[0.98]"
+            disabled={isExpanding}
+            className={`w-full flex items-center justify-center gap-2 py-2 px-3 text-white font-semibold rounded-lg shadow-sm transition-all ${
+              isExpanding
+                ? 'bg-[#238636]/60 cursor-wait opacity-90'
+                : 'bg-[#238636] hover:bg-[#2ea44f] active:scale-[0.98]'
+            }`}
           >
-            <UserPlus className="w-3.5 h-3.5" />
-            Expand Followers in Matrix
+            {isExpanding ? (
+              <>
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                <span>Expanding @{user.login}...</span>
+              </>
+            ) : (
+              <>
+                <UserPlus className="w-3.5 h-3.5" />
+                <span>Expand @{user.login}'s Followers</span>
+              </>
+            )}
           </button>
           <button
             onClick={() => user.login && onSetRootUser(user.login)}
-            className="w-full flex items-center justify-center gap-2 py-2 px-3 bg-[#21262d] hover:bg-[#30363d] text-[#c9d1d9] font-medium rounded-lg border border-[#30363d] transition-all"
+            disabled={isExpanding}
+            className="w-full flex items-center justify-center gap-2 py-2 px-3 bg-[#21262d] hover:bg-[#30363d] text-[#c9d1d9] font-medium rounded-lg border border-[#30363d] transition-all disabled:opacity-50"
           >
             <Compass className="w-3.5 h-3.5 text-[#58a6ff]" />
-            Set as Root & Re-crawl
+            Set @{user.login} as Root & Re-crawl
           </button>
         </div>
 

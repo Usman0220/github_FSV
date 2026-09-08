@@ -144,14 +144,18 @@ export class GitHubCrawlerService {
     username: string,
     limit: number,
     token?: string,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    forceRefresh: boolean = false
   ): Promise<{ followers: string[]; followerProfiles: Partial<GitHubUser>[]; rateLimit?: RateLimitInfo }> {
     if (this.isAborted || signal?.aborted) {
       return { followers: [], followerProfiles: [] };
     }
 
-    if (this.followersCache.has(username.toLowerCase())) {
-      return { followers: this.followersCache.get(username.toLowerCase())!, followerProfiles: [] };
+    if (!forceRefresh && this.followersCache.has(username.toLowerCase())) {
+      const cached = this.followersCache.get(username.toLowerCase())!;
+      if (cached.length >= limit) {
+        return { followers: cached.slice(0, limit), followerProfiles: [] };
+      }
     }
 
     // 1. First attempt: Direct Web Scraper (No REST API rate limits!)
