@@ -15,18 +15,19 @@ import { crawlerService, parseGitHubInput } from './services/githubCrawler';
 
 export default function App() {
   const [showSidebar, setShowSidebar] = useState(true);
-  const [options, setOptions] = useState<CrawlOptions>({
+  const [options, setOptions] = useState<CrawlOptions>(() => ({
     startUser: 'https://github.com/Usman0220',
-    token: '',
+    token: typeof window !== 'undefined' ? localStorage.getItem('gh_token') || '' : '',
     depth: 2,
     limit: 10,
     enablePhysics: true,
-  });
+  }));
 
   const [nodes, setNodes] = useState<NetworkNodeData[]>([]);
   const [edges, setEdges] = useState<NetworkEdgeData[]>([]);
   const [logs, setLogs] = useState<CrawlLog[]>([]);
   const [isCrawling, setIsCrawling] = useState(false);
+  const [activeScrapingUser, setActiveScrapingUser] = useState<string | null>(null);
   const [rateLimit, setRateLimit] = useState<RateLimitInfo>({
     remaining: null,
     limit: null,
@@ -38,8 +39,11 @@ export default function App() {
   const [inGraphFollowers, setInGraphFollowers] = useState<string[]>([]);
   const [inGraphFollowing, setInGraphFollowing] = useState<string[]>([]);
 
-  // Update options helper
+  // Update options helper with token storage
   const handleUpdateOptions = (newOpts: Partial<CrawlOptions>) => {
+    if (newOpts.token !== undefined && typeof window !== 'undefined') {
+      localStorage.setItem('gh_token', newOpts.token);
+    }
     setOptions((prev) => ({ ...prev, ...newOpts }));
   };
 
@@ -131,8 +135,9 @@ export default function App() {
           id: `edge-${from}-${to}`,
           from,
           to,
+          title: `@${from} follows @${to}`,
           color: {
-            color: 'rgba(88, 166, 255, 0.4)',
+            color: 'rgba(88, 166, 255, 0.45)',
             highlight: '#58a6ff',
             hover: '#79c0ff',
           },
@@ -152,11 +157,23 @@ export default function App() {
   const handleStartCrawl = useCallback(async () => {
     if (isCrawling) return;
 
+    const parsedTarget = parseGitHubInput(options.startUser);
+    if (!parsedTarget) {
+      addLog({
+        id: Math.random().toString(),
+        timestamp: new Date().toLocaleTimeString(),
+        message: '❌ Please enter a valid GitHub username or URL.',
+        type: 'error',
+      });
+      return;
+    }
+
     // Reset previous graph
     setNodes([]);
     setEdges([]);
     setSelectedUser(null);
     setIsCrawling(true);
+    setActiveScrapingUser(parsedTarget);
 
     try {
       await crawlerService.crawlNetwork(
@@ -171,8 +188,12 @@ export default function App() {
           onEdge: handleEdgeDiscovered,
           onLog: addLog,
           onRateLimit: setRateLimit,
+          onProgress: (currentUser) => {
+            setActiveScrapingUser(currentUser);
+          },
           onFinish: () => {
             setIsCrawling(false);
+            setActiveScrapingUser(null);
           },
         }
       );
@@ -184,21 +205,23 @@ export default function App() {
         type: 'error',
       });
       setIsCrawling(false);
+      setActiveScrapingUser(null);
     }
   }, [options, isCrawling, handleNodeDiscovered, handleEdgeDiscovered, addLog]);
 
-  // Stop Crawl
-  const handleStopCrawl = () => {
+  // Stop Crawl / Halt Scraping
+  const handleStopCrawl = useCallback(() => {
     crawlerService.abort();
     setIsCrawling(false);
-  };
+    setActiveScrapingUser(null);
+  }, []);
 
   // Expand single user followers
   const handleExpandUser = async (username: string) => {
     addLog({
       id: Math.random().toString(),
       timestamp: new Date().toLocaleTimeString(),
-      message: `🌱 Expanding follower network for: ${username}...`,
+      message: `🌱 Expanding follower network for: @${username}...`,
       type: 'info',
     });
 
@@ -206,11 +229,21 @@ export default function App() {
       const res = await crawlerService.fetchFollowers(username, options.limit, options.token);
       if (res.rateLimit) setRateLimit(res.rateLimit);
 
+      if (res.followers.length === 0) {
+        addLog({
+          id: Math.random().toString(),
+          timestamp: new Date().toLocaleTimeString(),
+          message: `ℹ️ @${username} has 0 followers (or follower list is empty).`,
+          type: 'info',
+        });
+        return;
+      }
+
       for (let i = 0; i < res.followers.length; i++) {
         const followerLogin = res.followers[i];
         const profile = res.followerProfiles[i] || {
           login: followerLogin,
-          avatar_url: `https://avatars.githubusercontent.com/u/78656003?v=4`,
+          avatar_url: `https://avatars.githubusercontent.com/u/0?v=4`,
           html_url: `https://github.com/${followerLogin}`,
         };
 
@@ -221,16 +254,25 @@ export default function App() {
       addLog({
         id: Math.random().toString(),
         timestamp: new Date().toLocaleTimeString(),
-        message: `✅ Added ${res.followers.length} followers for ${username}`,
+        message: `✅ Added ${res.followers.length} real followers for @${username}`,
         type: 'success',
       });
     } catch (err) {
-      addLog({
-        id: Math.random().toString(),
-        timestamp: new Date().toLocaleTimeString(),
-        message: `⚠️ Could not expand ${username}`,
-        type: 'warn',
-      });
+      if ((err as Error)?.message === 'RATE_LIMIT') {
+        addLog({
+          id: Math.random().toString(),
+          timestamp: new Date().toLocaleTimeString(),
+          message: `🛑 GitHub API Rate Limit reached while expanding @${username}. Please add a PAT in the sidebar.`,
+          type: 'error',
+        });
+      } else {
+        addLog({
+          id: Math.random().toString(),
+          timestamp: new Date().toLocaleTimeString(),
+          message: `⚠️ Could not expand @${username}: ${(err as Error)?.message || 'Failed to fetch'}`,
+          type: 'warn',
+        });
+      }
     }
   };
 
@@ -304,6 +346,9 @@ export default function App() {
         onImportGraph={handleImportGraph}
         showSidebar={showSidebar}
         onToggleSidebar={() => setShowSidebar((prev) => !prev)}
+        isCrawling={isCrawling}
+        onStopCrawl={handleStopCrawl}
+        activeScrapingUser={activeScrapingUser}
       />
 
       {/* Main Workspace Layout */}
@@ -316,6 +361,7 @@ export default function App() {
             onStartCrawl={handleStartCrawl}
             onStopCrawl={handleStopCrawl}
             isCrawling={isCrawling}
+            activeScrapingUser={activeScrapingUser}
             logs={logs}
             onClearLogs={handleClearLogs}
             rateLimit={rateLimit}
@@ -339,6 +385,9 @@ export default function App() {
               setInGraphFollowing(following);
             }}
             onExpandUser={handleExpandUser}
+            isCrawling={isCrawling}
+            onStopCrawl={handleStopCrawl}
+            activeScrapingUser={activeScrapingUser}
           />
 
           {/* User Details Inspector Drawer */}

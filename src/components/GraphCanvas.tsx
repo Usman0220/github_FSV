@@ -20,7 +20,8 @@ import {
   ChevronRight,
   HelpCircle,
   RotateCcw,
-  Crosshair
+  Crosshair,
+  Square
 } from 'lucide-react';
 import { NetworkNodeData, NetworkEdgeData, GitHubUser } from '../types';
 
@@ -31,6 +32,9 @@ interface GraphCanvasProps {
   onTogglePhysics: (enabled: boolean) => void;
   onSelectUser: (user: Partial<GitHubUser>, inGraphFollowers: string[], inGraphFollowing: string[]) => void;
   onExpandUser?: (username: string) => void;
+  isCrawling?: boolean;
+  onStopCrawl?: () => void;
+  activeScrapingUser?: string | null;
 }
 
 export const GraphCanvas: React.FC<GraphCanvasProps> = ({
@@ -39,6 +43,9 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
   enablePhysics,
   onTogglePhysics,
   onSelectUser,
+  isCrawling = false,
+  onStopCrawl,
+  activeScrapingUser,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const networkRef = useRef<Network | null>(null);
@@ -507,6 +514,31 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
         isFullscreen ? 'fixed inset-0 z-50' : ''
       }`}
     >
+      {/* Floating Active Scraping Indicator & Immediate Halt Button */}
+      {isCrawling && onStopCrawl && (
+        <div className="absolute top-16 left-1/2 -translate-x-1/2 z-30 flex items-center gap-3 px-4 py-2 rounded-full bg-[#161b22]/95 backdrop-blur-md border border-[#da3633]/60 shadow-2xl pointer-events-auto animate-in fade-in slide-in-from-top-2">
+          <span className="relative flex h-2.5 w-2.5 shrink-0">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#f85149] opacity-75" />
+            <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-[#da3633]" />
+          </span>
+          <span className="text-xs text-[#c9d1d9] whitespace-nowrap">
+            Scraping followers for{' '}
+            <strong className="text-[#58a6ff] font-mono">
+              {activeScrapingUser ? `@${activeScrapingUser}` : 'target'}
+            </strong>{' '}
+            <span className="text-[#8b949e]">({nodes.length} nodes, {edges.length} edges)</span>
+          </span>
+          <button
+            onClick={onStopCrawl}
+            className="flex items-center gap-1.5 px-3 py-1 bg-[#da3633] hover:bg-[#f85149] active:scale-95 text-white font-bold text-xs rounded-full shadow-lg transition-all cursor-pointer"
+            title="Immediately halt graph scraping"
+          >
+            <Square className="w-3 h-3 fill-white" />
+            <span>Stop Scraping</span>
+          </button>
+        </div>
+      )}
+
       {/* Top Floating Graph Toolbar */}
       <div className="absolute top-4 left-4 right-4 z-20 flex flex-wrap items-center justify-between gap-3 pointer-events-none">
         {/* Left: Search Bar */}

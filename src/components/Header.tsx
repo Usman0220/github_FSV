@@ -8,7 +8,8 @@ import {
   RotateCcw,
   Check,
   Github,
-  SlidersHorizontal
+  SlidersHorizontal,
+  Square
 } from 'lucide-react';
 import { NetworkNodeData, NetworkEdgeData } from '../types';
 
@@ -19,6 +20,9 @@ interface HeaderProps {
   onImportGraph: (data: { nodes: NetworkNodeData[]; edges: NetworkEdgeData[] }) => void;
   showSidebar: boolean;
   onToggleSidebar: () => void;
+  isCrawling?: boolean;
+  onStopCrawl?: () => void;
+  activeScrapingUser?: string | null;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -28,6 +32,9 @@ export const Header: React.FC<HeaderProps> = ({
   onImportGraph,
   showSidebar,
   onToggleSidebar,
+  isCrawling = false,
+  onStopCrawl,
+  activeScrapingUser,
 }) => {
   const [showHelp, setShowHelp] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -71,9 +78,9 @@ export const Header: React.FC<HeaderProps> = ({
 
   return (
     <>
-      <header className="h-14 border-b border-[#30363d] bg-[#161b22] px-4 flex items-center justify-between shrink-0 z-30">
+      <header className="h-14 border-b border-[#30363d] bg-[#161b22] px-4 flex items-center justify-between shrink-0 z-30 gap-2">
         {/* Left branding */}
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 shrink-0">
           <button
             onClick={onToggleSidebar}
             title={showSidebar ? 'Hide Controls' : 'Show Controls'}
@@ -90,8 +97,32 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
         </div>
 
+        {/* Center: Scraping Status & Halt Scraping Button */}
+        {isCrawling && onStopCrawl && (
+          <div className="flex items-center gap-2 px-3 py-1 rounded-lg bg-[#da3633]/15 border border-[#da3633]/40 shadow-sm animate-in fade-in">
+            <span className="relative flex h-2.5 w-2.5 shrink-0">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#f85149] opacity-75" />
+              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-[#da3633]" />
+            </span>
+            <div className="hidden md:flex items-center gap-1.5 text-xs text-[#f0f6fc]">
+              <span className="text-[#8b949e]">Scraping:</span>
+              <span className="font-mono font-semibold text-[#f85149] max-w-[130px] truncate">
+                {activeScrapingUser ? `@${activeScrapingUser}` : 'Network'}
+              </span>
+            </div>
+            <button
+              onClick={onStopCrawl}
+              className="flex items-center gap-1.5 px-2.5 py-1 bg-[#da3633] hover:bg-[#f85149] active:scale-95 text-white font-bold text-xs rounded-md shadow transition-all cursor-pointer"
+              title="Immediately halt active scraping"
+            >
+              <Square className="w-3.5 h-3.5 fill-white" />
+              <span>Halt Scraping</span>
+            </button>
+          </div>
+        )}
+
         {/* Right actions */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 shrink-0">
           {/* Reset */}
           <button
             onClick={onResetGraph}

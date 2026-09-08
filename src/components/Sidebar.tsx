@@ -23,6 +23,7 @@ interface SidebarProps {
   onStartCrawl: () => void;
   onStopCrawl: () => void;
   isCrawling: boolean;
+  activeScrapingUser?: string | null;
   logs: CrawlLog[];
   onClearLogs: () => void;
   rateLimit: RateLimitInfo;
@@ -45,6 +46,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onStartCrawl,
   onStopCrawl,
   isCrawling,
+  activeScrapingUser,
   logs,
   onClearLogs,
   rateLimit,
@@ -73,10 +75,19 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </div>
           </div>
           {isCrawling ? (
-            <span className="flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-[#3fb950]/15 text-[#3fb950] border border-[#238636]/40 animate-pulse">
-              <span className="w-1.5 h-1.5 rounded-full bg-[#3fb950]" />
-              Crawling
-            </span>
+            <div className="flex items-center gap-1.5">
+              <span className="flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-[#da3633]/20 text-[#f85149] border border-[#da3633]/40 animate-pulse">
+                <span className="w-1.5 h-1.5 rounded-full bg-[#f85149]" />
+                Scraping...
+              </span>
+              <button
+                onClick={onStopCrawl}
+                title="Halt scraping immediately"
+                className="text-[10px] bg-[#da3633] hover:bg-[#f85149] text-white px-2 py-0.5 rounded font-bold transition-all cursor-pointer"
+              >
+                Halt
+              </button>
+            </div>
           ) : (
             <span className="flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-medium bg-[#21262d] text-[#8b949e] border border-[#30363d]">
               <span className="w-1.5 h-1.5 rounded-full bg-[#8b949e]" />
@@ -177,23 +188,22 @@ export const Sidebar: React.FC<SidebarProps> = ({
           {showTokenHelp && (
             <div className="p-2.5 rounded bg-[#161b22] border border-[#30363d] text-[11px] text-[#8b949e] space-y-1">
               <p>
-                <strong className="text-[#c9d1d9]">No token:</strong> Rate limited to 60 requests/hour by GitHub.
+                <strong className="text-[#3fb950]">Direct Web Scraping:</strong> Active by default. Scrapes live GitHub profiles and follower pages directly without REST API rate limits.
               </p>
               <p>
-                <strong className="text-[#c9d1d9]">With Personal Access Token:</strong> 5,000 requests/hour for deep graph crawling.
+                <strong className="text-[#c9d1d9]">GitHub PAT (Optional):</strong> You can optionally supply a token to access private follower graphs or REST endpoints.
               </p>
             </div>
           )}
 
-          {/* Rate limit status display */}
-          {rateLimit.limit !== null && (
-            <div className="flex items-center justify-between text-[11px] text-[#8b949e] pt-0.5">
-              <span>Rate Limit Remaining:</span>
-              <span className="font-mono text-[#58a6ff]">
-                {rateLimit.remaining} / {rateLimit.limit}
-              </span>
-            </div>
-          )}
+          {/* Engine status display */}
+          <div className="flex items-center justify-between text-[11px] text-[#8b949e] pt-0.5">
+            <span>Scraping Engine:</span>
+            <span className="font-mono text-[#3fb950] font-semibold flex items-center gap-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-[#3fb950] inline-block" />
+              Direct Web Scraper (No Limits)
+            </span>
+          </div>
         </div>
 
         {/* Options Row (Depth & Limit) */}
@@ -257,17 +267,25 @@ export const Sidebar: React.FC<SidebarProps> = ({
         {/* Action Button: Generate / Stop */}
         <div className="pt-1">
           {isCrawling ? (
-            <button
-              onClick={onStopCrawl}
-              className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-[#da3633] hover:bg-[#f85149] text-white font-bold rounded-lg shadow-lg transition-all active:scale-[0.98]"
-            >
-              <Square className="w-4 h-4 fill-white" />
-              Stop Crawler
-            </button>
+            <div className="space-y-2">
+              <button
+                onClick={onStopCrawl}
+                className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-[#da3633] hover:bg-[#f85149] text-white font-bold rounded-lg shadow-xl shadow-[#da3633]/25 border border-[#f85149]/40 transition-all active:scale-[0.98] cursor-pointer"
+              >
+                <Square className="w-4 h-4 fill-white animate-pulse" />
+                <span>Stop / Halt Scraping</span>
+              </button>
+              {activeScrapingUser && (
+                <div className="flex items-center justify-between px-3 py-1.5 rounded-md bg-[#161b22] border border-[#da3633]/30 text-[11px]">
+                  <span className="text-[#8b949e]">Current target:</span>
+                  <span className="font-mono font-semibold text-[#f85149]">@{activeScrapingUser}</span>
+                </div>
+              )}
+            </div>
           ) : (
             <button
               onClick={onStartCrawl}
-              className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-[#238636] hover:bg-[#2ea44f] text-white font-bold rounded-lg shadow-lg shadow-[#238636]/20 transition-all active:scale-[0.98]"
+              className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-[#238636] hover:bg-[#2ea44f] text-white font-bold rounded-lg shadow-lg shadow-[#238636]/20 transition-all active:scale-[0.98] cursor-pointer"
             >
               <Play className="w-4 h-4 fill-white" />
               Generate Interactive Graph
