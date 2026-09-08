@@ -42,7 +42,22 @@ const DEFAULT_HEADERS = {
   Pragma: 'no-cache',
 };
 
+interface CachedItem<T> {
+  data: T;
+  timestamp: number;
+}
+
+const profileCache = new Map<string, CachedItem<GitHubUserScraped>>();
+const htmlPageCache = new Map<string, CachedItem<string>>();
+const CACHE_TTL_MS = 3 * 60 * 1000; // 3 minutes cache
+
 async function scrapeUserProfile(username: string): Promise<GitHubUserScraped | null> {
+  const cacheKey = username.toLowerCase();
+  const cached = profileCache.get(cacheKey);
+  if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
+    return cached.data;
+  }
+
   const url = `https://github.com/${encodeURIComponent(username)}`;
   const res = await fetch(url, { headers: DEFAULT_HEADERS });
 
@@ -91,7 +106,7 @@ async function scrapeUserProfile(username: string): Promise<GitHubUserScraped | 
     ? avatarMatch[1].replace(/&amp;/g, '&')
     : `https://avatars.githubusercontent.com/u/0?v=4`;
 
-  return {
+  const profile: GitHubUserScraped = {
     login: username,
     id: Math.abs(hashCode(username)),
     avatar_url: cleanAvatar,
@@ -104,69 +119,127 @@ async function scrapeUserProfile(username: string): Promise<GitHubUserScraped | 
     following: parseNumericStat(followingMatch ? followingMatch[1] : undefined),
     public_repos: parseNumericStat(reposMatch ? reposMatch[1] : undefined),
   };
+
+  profileCache.set(cacheKey, { data: profile, timestamp: Date.now() });
+  return profile;
+}
+
+async function fetchGitHubFollowersHtml(username: string, page: number): Promise<string | null> {
+  const cacheKey = `${username.toLowerCase()}:followers:${page}`;
+  const cached = htmlPageCache.get(cacheKey);
+  if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
+    return cached.data;
+  }
+
+  try {
+    const url = `https://github.com/${encodeURIComponent(username)}?tab=followers&page=${page}`;
+    const res = await fetch(url, { headers: DEFAULT_HEADERS });
+    if (!res.ok) return null;
+    const html = await res.text();
+    htmlPageCache.set(cacheKey, { data: html, timestamp: Date.now() });
+    return html;
+  } catch (err) {
+    console.error(`Error fetching followers page ${page} for ${username}:`, err);
+    return null;
+  }
+}
+
+function parseFollowersFromHtml(html: string): { followers: string[]; profiles: ScrapedFollowerProfile[] } {
+  const followers: string[] = [];
+  const profiles: ScrapedFollowerProfile[] = [];
+  const seen = new Set<string>();
+
+  const itemRegex = /<div class="d-table table-fixed[^>]*>([\s\S]*?)<\/div>\s*<\/div>/g;
+  let match: RegExpExecArray | null;
+
+  while ((match = itemRegex.exec(html)) !== null) {
+    const block = match[1];
+    const loginM =
+      block.match(/data-hovercard-url="\/users\/([^/"]+)\/hovercard"/) ||
+      block.match(/href="\/([a-zA-Z0-9_\-]+)"[^>]*data-hovercard-type="user"/);
+
+    const imgM = block.match(/src="([^"]+)"/);
+    const nameM =
+      block.match(/<span class="[^"]*f4[^"]*">([^<]+)<\/span>/) ||
+      block.match(/<span class="Link--primary[^"]*">([^<]+)<\/span>/);
+
+    if (loginM && loginM[1]) {
+      const login = loginM[1].trim();
+      if (['features', 'security', 'enterprise', 'customer-stories', 'readme', 'topics'].includes(login.toLowerCase())) {
+        continue;
+      }
+
+      if (!seen.has(login.toLowerCase())) {
+        seen.add(login.toLowerCase());
+        followers.push(login);
+        profiles.push({
+          login,
+          name: nameM ? nameM[1].trim() : login,
+          avatar_url: imgM
+            ? imgM[1].replace(/&amp;/g, '&')
+            : `https://avatars.githubusercontent.com/u/0?v=4`,
+          html_url: `https://github.com/${login}`,
+        });
+      }
+    }
+  }
+
+  return { followers, profiles };
 }
 
 async function scrapeUserFollowers(
   username: string,
-  limit: number = 20
-): Promise<{ followers: string[]; profiles: ScrapedFollowerProfile[] }> {
-  const followers: string[] = [];
-  const profiles: ScrapedFollowerProfile[] = [];
+  limit: number = 20,
+  batchPage: number = 1
+): Promise<{ followers: string[]; profiles: ScrapedFollowerProfile[]; page: number; nextPage: number; hasMore: boolean }> {
+  const p = Math.max(1, batchPage);
+  const l = Math.max(1, limit);
+  const targetStartIndex = (p - 1) * l;
+  const targetEndIndex = targetStartIndex + l;
+
+  // GitHub followers tab contains 50 items per HTML page
+  const startHtmlPage = Math.floor(targetStartIndex / 50) + 1;
+  const endHtmlPage = Math.floor((targetEndIndex - 1) / 50) + 1;
+
+  const allFollowers: string[] = [];
+  const allProfiles: ScrapedFollowerProfile[] = [];
   const seen = new Set<string>();
-  let page = 1;
-  // Calculate maximum pages to inspect to satisfy the requested limit
-  const maxPages = Math.max(Math.ceil(limit / 25) + 3, 500);
 
-  while (followers.length < limit && page <= maxPages) {
-    const url = `https://github.com/${encodeURIComponent(username)}?tab=followers&page=${page}`;
-    const res = await fetch(url, { headers: DEFAULT_HEADERS });
+  for (let hp = startHtmlPage; hp <= endHtmlPage; hp++) {
+    const html = await fetchGitHubFollowersHtml(username, hp);
+    if (!html) break;
 
-    if (!res.ok) break;
-    const html = await res.text();
+    const parsed = parseFollowersFromHtml(html);
+    if (parsed.followers.length === 0) break;
 
-    const itemRegex = /<div class="d-table table-fixed[^>]*>([\s\S]*?)<\/div>\s*<\/div>/g;
-    let match: RegExpExecArray | null;
-    let foundInPage = 0;
-
-    while ((match = itemRegex.exec(html)) !== null && followers.length < limit) {
-      const block = match[1];
-      const loginM =
-        block.match(/data-hovercard-url="\/users\/([^/"]+)\/hovercard"/) ||
-        block.match(/href="\/([a-zA-Z0-9_\-]+)"[^>]*data-hovercard-type="user"/);
-
-      const imgM = block.match(/src="([^"]+)"/);
-      const nameM =
-        block.match(/<span class="[^"]*f4[^"]*">([^<]+)<\/span>/) ||
-        block.match(/<span class="Link--primary[^"]*">([^<]+)<\/span>/);
-
-      if (loginM && loginM[1]) {
-        const login = loginM[1].trim();
-        // Discard common GitHub navigation keywords if mismatched
-        if (['features', 'security', 'enterprise', 'customer-stories', 'readme', 'topics'].includes(login.toLowerCase())) {
-          continue;
-        }
-
-        if (!seen.has(login.toLowerCase())) {
-          seen.add(login.toLowerCase());
-          followers.push(login);
-          profiles.push({
-            login,
-            name: nameM ? nameM[1].trim() : login,
-            avatar_url: imgM
-              ? imgM[1].replace(/&amp;/g, '&')
-              : `https://avatars.githubusercontent.com/u/0?v=4`,
-            html_url: `https://github.com/${login}`,
-          });
-          foundInPage++;
-        }
+    for (let i = 0; i < parsed.followers.length; i++) {
+      const u = parsed.followers[i];
+      if (!seen.has(u.toLowerCase())) {
+        seen.add(u.toLowerCase());
+        allFollowers.push(u);
+        allProfiles.push(parsed.profiles[i]);
       }
     }
 
-    if (foundInPage === 0) break;
-    page++;
+    if (parsed.followers.length < 50) {
+      break;
+    }
   }
 
-  return { followers, profiles };
+  const baseOffset = (startHtmlPage - 1) * 50;
+  const sliceStart = Math.max(0, targetStartIndex - baseOffset);
+  const sliceEnd = sliceStart + l;
+
+  const slicedFollowers = allFollowers.slice(sliceStart, sliceEnd);
+  const slicedProfiles = allProfiles.slice(sliceStart, sliceEnd);
+
+  return {
+    followers: slicedFollowers,
+    profiles: slicedProfiles,
+    page: p,
+    nextPage: p + 1,
+    hasMore: slicedFollowers.length === l,
+  };
 }
 
 function hashCode(str: string): number {
@@ -214,6 +287,8 @@ async function startServer() {
     const username = (req.query.username as string || '').trim();
     const rawLimit = parseInt(req.query.limit as string || '10', 10);
     const limit = isNaN(rawLimit) || rawLimit < 1 ? 10 : rawLimit;
+    const rawPage = parseInt(req.query.page as string || '1', 10);
+    const page = isNaN(rawPage) || rawPage < 1 ? 1 : rawPage;
 
     if (!username) {
       res.status(400).json({ error: 'Username is required' });
@@ -221,8 +296,8 @@ async function startServer() {
     }
 
     try {
-      const { followers, profiles } = await scrapeUserFollowers(username, limit);
-      res.json({ followers, profiles, count: followers.length });
+      const { followers, profiles, nextPage, hasMore } = await scrapeUserFollowers(username, limit, page);
+      res.json({ followers, profiles, count: followers.length, page, nextPage, hasMore });
     } catch (err: unknown) {
       console.error(`Error scraping followers for ${username}:`, err);
       res.status(500).json({ error: (err as Error)?.message || 'Scraping followers failed' });

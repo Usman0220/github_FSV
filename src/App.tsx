@@ -163,14 +163,17 @@ export default function App() {
 
   // Start Crawl
   const handleStartCrawl = useCallback(
-    async (overrideUser?: string) => {
+    async (overrideUser?: unknown) => {
       // Abort any ongoing crawl
       crawlerService.abort();
       setIsCrawling(false);
       setActiveScrapingUser(null);
 
       const currentOptions = optionsRef.current;
-      const rawTarget = overrideUser || currentOptions.startUser;
+      const rawTarget =
+        typeof overrideUser === 'string' && overrideUser.trim()
+          ? overrideUser.trim()
+          : currentOptions.startUser;
       const parsedTarget = parseGitHubInput(rawTarget);
 
       if (!parsedTarget) {
@@ -487,7 +490,7 @@ export default function App() {
           <Sidebar
             options={options}
             onChangeOptions={handleUpdateOptions}
-            onStartCrawl={handleStartCrawl}
+            onStartCrawl={() => handleStartCrawl()}
             onStopCrawl={handleStopCrawl}
             isCrawling={isCrawling}
             activeScrapingUser={activeScrapingUser}

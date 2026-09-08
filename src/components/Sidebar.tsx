@@ -13,9 +13,11 @@ import {
   EyeOff, 
   ExternalLink,
   ChevronRight,
-  Info
+  Info,
+  Zap,
+  Gauge
 } from 'lucide-react';
-import { CrawlOptions, CrawlLog, RateLimitInfo } from '../types';
+import { CrawlOptions, CrawlLog, RateLimitInfo, FetchSpeed } from '../types';
 
 interface SidebarProps {
   options: CrawlOptions;
@@ -291,6 +293,80 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </div>
         </div>
 
+        {/* Fetch Speed & Performance Section */}
+        <div className="space-y-2 pt-1">
+          <div className="flex items-center justify-between">
+            <label className="font-semibold text-[#c9d1d9] flex items-center gap-1.5 text-xs">
+              <Zap className="w-3.5 h-3.5 text-[#e3b341]" />
+              Fetch Speed:
+            </label>
+            <span className="font-mono text-[10px] text-[#58a6ff] bg-[#1f6feb]/15 px-1.5 py-0.5 rounded border border-[#1f6feb]/30">
+              {options.fetchDelayMs !== undefined
+                ? `${options.fetchDelayMs}ms delay`
+                : options.fetchSpeed === 'turbo'
+                ? '0ms (Instant)'
+                : options.fetchSpeed === 'fast'
+                ? '35ms (Fast)'
+                : options.fetchSpeed === 'safe'
+                ? '350ms (Paced)'
+                : '120ms (Standard)'}
+            </span>
+          </div>
+
+          {/* Speed Preset Buttons */}
+          <div className="grid grid-cols-4 gap-1.5">
+            {[
+              { id: 'turbo' as FetchSpeed, label: 'Turbo', icon: '⚡', delay: 0 },
+              { id: 'fast' as FetchSpeed, label: 'Fast', icon: '🚀', delay: 35 },
+              { id: 'balanced' as FetchSpeed, label: 'Normal', icon: '⚖️', delay: 120 },
+              { id: 'safe' as FetchSpeed, label: 'Paced', icon: '🛡️', delay: 350 },
+            ].map((sp) => {
+              const isActive =
+                options.fetchSpeed === sp.id ||
+                (options.fetchDelayMs !== undefined && options.fetchDelayMs === sp.delay);
+              return (
+                <button
+                  key={sp.id}
+                  type="button"
+                  onClick={() => onChangeOptions({ fetchSpeed: sp.id, fetchDelayMs: sp.delay })}
+                  className={`py-1.5 px-1 rounded-md text-[11px] font-semibold flex flex-col items-center gap-0.5 border transition-all ${
+                    isActive
+                      ? 'bg-[#238636] text-white border-[#2ea44f] shadow-sm'
+                      : 'bg-[#161b22] text-[#8b949e] border-[#30363d] hover:bg-[#21262d] hover:text-[#c9d1d9]'
+                  }`}
+                  title={`${sp.label} Speed: ${sp.delay}ms crawl delay`}
+                >
+                  <span className="text-xs">{sp.icon}</span>
+                  <span className="text-[10px] leading-tight">{sp.label}</span>
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Precision delay slider for granular control */}
+          <div className="flex items-center gap-2 pt-0.5">
+            <input
+              type="range"
+              min="0"
+              max="500"
+              step="10"
+              value={options.fetchDelayMs ?? (options.fetchSpeed === 'turbo' ? 0 : options.fetchSpeed === 'fast' ? 35 : options.fetchSpeed === 'safe' ? 350 : 120)}
+              onChange={(e) => {
+                const ms = parseInt(e.target.value, 10);
+                let speed: FetchSpeed = 'balanced';
+                if (ms === 0) speed = 'turbo';
+                else if (ms <= 50) speed = 'fast';
+                else if (ms >= 300) speed = 'safe';
+                onChangeOptions({ fetchDelayMs: ms, fetchSpeed: speed });
+              }}
+              className="flex-1 h-1.5 bg-[#21262d] rounded-lg appearance-none cursor-pointer accent-[#238636]"
+            />
+            <span className="font-mono text-[10px] text-[#8b949e] w-12 text-right">
+              {options.fetchDelayMs ?? (options.fetchSpeed === 'turbo' ? 0 : options.fetchSpeed === 'fast' ? 35 : options.fetchSpeed === 'safe' ? 350 : 120)}ms
+            </span>
+          </div>
+        </div>
+
         {/* Physics Checkbox */}
         <div className="pt-2">
           <label className="flex items-center gap-2.5 p-2 rounded-lg bg-[#161b22] border border-[#30363d] cursor-pointer hover:border-[#58a6ff]/50 transition-colors">
@@ -327,7 +403,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </div>
           ) : (
             <button
-              onClick={onStartCrawl}
+              onClick={() => onStartCrawl()}
               className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-[#238636] hover:bg-[#2ea44f] text-white font-bold rounded-lg shadow-lg shadow-[#238636]/20 transition-all active:scale-[0.98] cursor-pointer"
             >
               <Play className="w-4 h-4 fill-white" />

@@ -1,7 +1,7 @@
 import { GitHubUser, RateLimitInfo, CrawlLog } from '../types';
 
-export function parseGitHubInput(val: string): string {
-  if (!val) return '';
+export function parseGitHubInput(val: unknown): string {
+  if (!val || typeof val !== 'string') return '';
   const trimmed = val.trim();
   if (trimmed.includes('github.com/')) {
     try {
@@ -86,7 +86,7 @@ export class GitHubCrawlerService {
     const headers: Record<string, string> = {
       Accept: 'application/vnd.github.v3+json',
     };
-    if (token) {
+    if (token && typeof token === 'string' && token.trim()) {
       headers['Authorization'] = `Bearer ${token.trim()}`;
     }
 
@@ -145,32 +145,44 @@ export class GitHubCrawlerService {
     limit: number,
     token?: string,
     signal?: AbortSignal,
-    forceRefresh: boolean = false
-  ): Promise<{ followers: string[]; followerProfiles: Partial<GitHubUser>[]; rateLimit?: RateLimitInfo }> {
+    forceRefresh: boolean = false,
+    page: number = 1
+  ): Promise<{
+    followers: string[];
+    followerProfiles: Partial<GitHubUser>[];
+    page?: number;
+    nextPage?: number;
+    hasMore?: boolean;
+    rateLimit?: RateLimitInfo;
+  }> {
     if (this.isAborted || signal?.aborted) {
       return { followers: [], followerProfiles: [] };
     }
 
-    if (!forceRefresh && this.followersCache.has(username.toLowerCase())) {
-      const cached = this.followersCache.get(username.toLowerCase())!;
+    const cacheKey = `${username.toLowerCase()}:p${page}`;
+    if (!forceRefresh && this.followersCache.has(cacheKey)) {
+      const cached = this.followersCache.get(cacheKey)!;
       if (cached.length >= limit) {
-        return { followers: cached.slice(0, limit), followerProfiles: [] };
+        return { followers: cached.slice(0, limit), followerProfiles: [], page, nextPage: page + 1 };
       }
     }
 
     // 1. First attempt: Direct Web Scraper (No REST API rate limits!)
     try {
       const scrapeRes = await fetch(
-        `/api/scrape/followers?username=${encodeURIComponent(username)}&limit=${limit}`,
+        `/api/scrape/followers?username=${encodeURIComponent(username)}&limit=${limit}&page=${page}`,
         { signal }
       );
       if (scrapeRes.ok) {
         const data = await scrapeRes.json();
         if (Array.isArray(data.followers)) {
-          this.followersCache.set(username.toLowerCase(), data.followers);
+          this.followersCache.set(cacheKey, data.followers);
           return {
             followers: data.followers,
             followerProfiles: data.profiles || [],
+            page: data.page || page,
+            nextPage: data.nextPage || page + 1,
+            hasMore: data.hasMore ?? (data.followers.length === limit),
           };
         }
       }
@@ -182,13 +194,13 @@ export class GitHubCrawlerService {
     const headers: Record<string, string> = {
       Accept: 'application/vnd.github.v3+json',
     };
-    if (token) {
+    if (token && typeof token === 'string' && token.trim()) {
       headers['Authorization'] = `Bearer ${token.trim()}`;
     }
 
     try {
       const res = await fetch(
-        `https://api.github.com/users/${encodeURIComponent(username)}/followers?per_page=${Math.min(limit, 100)}`,
+        `https://api.github.com/users/${encodeURIComponent(username)}/followers?per_page=${Math.min(limit, 100)}&page=${page}`,
         { headers, signal }
       );
 
@@ -224,8 +236,15 @@ export class GitHubCrawlerService {
         }
       }
 
-      this.followersCache.set(username.toLowerCase(), followerLogins);
-      return { followers: followerLogins, followerProfiles: profiles, rateLimit };
+      this.followersCache.set(cacheKey, followerLogins);
+      return {
+        followers: followerLogins,
+        followerProfiles: profiles,
+        page,
+        nextPage: page + 1,
+        hasMore: followerLogins.length === Math.min(limit, 100),
+        rateLimit,
+      };
     } catch (err: unknown) {
       if ((err as any)?.name === 'AbortError' || this.isAborted || signal?.aborted) {
         return { followers: [], followerProfiles: [] };
@@ -240,6 +259,8 @@ export class GitHubCrawlerService {
       token?: string;
       depth: number;
       limit: number;
+      fetchSpeed?: 'turbo' | 'fast' | 'balanced' | 'safe';
+      fetchDelayMs?: number;
     },
     callbacks: {
       onNode: (user: Partial<GitHubUser>, isRoot: boolean, level: number) => void;
@@ -304,25 +325,25 @@ export class GitHubCrawlerService {
       let followerProfiles: Partial<GitHubUser>[] = [];
 
       try {
-        const uRes = await this.fetchUserDetails(currentLogin, options.token, signal);
+        // Parallelized fetch for user profile and followers (dramatically boosts crawl speed)
+        const [uRes, fRes] = await Promise.all([
+          this.fetchUserDetails(currentLogin, options.token, signal),
+          this.fetchFollowers(currentLogin, options.limit, options.token, signal, item.isRoot, 1),
+        ]);
+
         if (this.isAborted || signal.aborted) {
           wasHalted = true;
           break;
         }
         if (uRes.rateLimit) callbacks.onRateLimit(uRes.rateLimit);
-        userProfile = uRes.user;
+        if (fRes.rateLimit) callbacks.onRateLimit(fRes.rateLimit);
 
+        userProfile = uRes.user;
         if (!userProfile) {
           addLog(`⚠️ User @${currentLogin} not found on GitHub or profile inaccessible.`, 'warn');
           continue;
         }
 
-        const fRes = await this.fetchFollowers(currentLogin, options.limit, options.token, signal, item.isRoot);
-        if (this.isAborted || signal.aborted) {
-          wasHalted = true;
-          break;
-        }
-        if (fRes.rateLimit) callbacks.onRateLimit(fRes.rateLimit);
         followers = fRes.followers;
         followerProfiles = fRes.followerProfiles;
       } catch (err: unknown) {
@@ -387,20 +408,34 @@ export class GitHubCrawlerService {
         break;
       }
 
+      // Calculate speed-based crawl delay (0ms for Turbo, 35ms for Fast, 120ms for Balanced, 350ms for Safe)
+      let crawlDelay = 120;
+      if (options.fetchDelayMs !== undefined) {
+        crawlDelay = Math.max(0, options.fetchDelayMs);
+      } else if (options.fetchSpeed === 'turbo') {
+        crawlDelay = 0;
+      } else if (options.fetchSpeed === 'fast') {
+        crawlDelay = 35;
+      } else if (options.fetchSpeed === 'safe') {
+        crawlDelay = 350;
+      }
+
       // Responsive delay that cancels immediately on abort
-      await new Promise<void>((resolve) => {
-        const timer = setTimeout(() => resolve(), 150);
-        if (signal.aborted || this.isAborted) {
-          clearTimeout(timer);
-          resolve();
-          return;
-        }
-        const onAbort = () => {
-          clearTimeout(timer);
-          resolve();
-        };
-        signal.addEventListener('abort', onAbort, { once: true });
-      });
+      if (crawlDelay > 0) {
+        await new Promise<void>((resolve) => {
+          const timer = setTimeout(() => resolve(), crawlDelay);
+          if (signal.aborted || this.isAborted) {
+            clearTimeout(timer);
+            resolve();
+            return;
+          }
+          const onAbort = () => {
+            clearTimeout(timer);
+            resolve();
+          };
+          signal.addEventListener('abort', onAbort, { once: true });
+        });
+      }
 
       if (this.isAborted || signal.aborted) {
         wasHalted = true;

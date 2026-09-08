@@ -25,6 +25,8 @@ interface NodeInspectorProps {
   onFocusNode: (username: string) => void;
   isExpanding?: boolean;
   isSettingRoot?: boolean;
+  expansionBatch?: number;
+  batchLimit?: number;
 }
 
 export const NodeInspector: React.FC<NodeInspectorProps> = ({
@@ -37,6 +39,8 @@ export const NodeInspector: React.FC<NodeInspectorProps> = ({
   onFocusNode,
   isExpanding = false,
   isSettingRoot = false,
+  expansionBatch = 1,
+  batchLimit = 10,
 }) => {
   if (!user) return null;
 
@@ -153,12 +157,16 @@ export const NodeInspector: React.FC<NodeInspectorProps> = ({
             {isExpanding ? (
               <>
                 <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                <span>Expanding @{user.login}...</span>
+                <span>Fetching Batch #{expansionBatch}...</span>
               </>
             ) : (
               <>
                 <UserPlus className="w-3.5 h-3.5" />
-                <span>Expand @{user.login}'s Followers</span>
+                <span>
+                  {expansionBatch > 1
+                    ? `Expand Next (+${batchLimit} new followers)`
+                    : `Expand Followers (+${batchLimit} new)`}
+                </span>
               </>
             )}
           </button>

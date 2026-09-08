@@ -64,12 +64,16 @@ export interface NetworkEdgeData {
   dashes?: boolean;
 }
 
+export type FetchSpeed = 'turbo' | 'fast' | 'balanced' | 'safe';
+
 export interface CrawlOptions {
   startUser: string;
   token?: string;
   depth: number;
   limit: number;
   enablePhysics: boolean;
+  fetchSpeed?: FetchSpeed;
+  fetchDelayMs?: number;
 }
 
 export interface CrawlLog {
